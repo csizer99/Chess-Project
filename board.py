@@ -2,6 +2,21 @@ import pygame
 import sys
 import torch
 import numpy as np
+from torch import nn
+
+
+
+
+class NeuralNetwork(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels = 13, kernel_size = 3, stride = 1, out_channels = 64, padding = 1)
+        self.conv2 = nn.Conv2d(in_channels = 64, kernel_size = 3, stride = 1, out_channels = 128, padding = 1)
+        self.stack = nn.Sequential(self.conv1, nn.ReLU(), self.conv2, nn.ReLU(), nn.Flatten(), nn.Linear(128 * 8 * 8, 256), nn.ReLU(), nn.Linear(256, 1))
+    def forward(self, x):
+        logits = self.stack(x)
+        return logits
+
 
 
 # Pygame is a library that wraps SDL (Simple DirectMedia Layer), giving us
@@ -15,9 +30,15 @@ class Board:
         # pygame.init() starts all pygame subsystems (display, sound, input, etc.)
         # It must be called before anything else in pygame.
         pygame.init()
+        pygame.font.init()
+        
 
         self.width_of_window = 800
         self.height_of_window = 800
+        self.game_mode = None
+        self.font = pygame.font.SysFont("Arial", 32)
+        self.big_font = pygame.font.SysFont("Arial", 48)
+        
 
         # pygame.RESIZABLE lets the user drag the window edges to resize it.
         # The board's square sizes are recalculated each frame to match,
@@ -34,6 +55,7 @@ class Board:
 
         self.model = model
         self.humanColor = 1
+        
 
         
 
@@ -70,6 +92,11 @@ class Board:
         self.bqBit = 1 << 59
         self.bkBit = 1 << 60
 
+
+
+
+
+
         # A dictionary to hold loaded piece images, keyed by piece code (e.g. "wp", "bk").
         # Loading images once here is important — loading from disk inside the game
         # loop every frame would be extremely slow.
@@ -93,6 +120,34 @@ class Board:
         self.displayImages()
         # self.startImages()
 
+    def show_menu(self):
+        menuRun = True
+        while menuRun:
+            self.board.fill((40, 44, 52))
+            title = self.big_font.render("Chess engine", True, (255, 255, 255))
+            self.board.blit(title, (self.width_of_window//2 - 120, 150))
+            humanButton = pygame.Rect(self.width_of_window//2 - 150, 300, 300, 60)
+            AIButton = pygame.Rect(self.width_of_window//2 - 150, 400, 300, 60)
+            pygame.draw.rect(self.board, (116, 148, 86), humanButton)
+            pygame.draw.rect(self.board, (70, 70, 70), AIButton)
+            humanText = self.font.render("Against Human", True, (255, 255, 255))
+            AIText = self.font.render("Against AI", True, (255, 255, 255))
+            self.board.blit(humanText, (humanButton.x + 75, humanButton.y + 12))
+            self.board.blit(AIText, (AIButton.x + 95, AIButton.y + 12))
+            pygame.display.flip()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if (humanButton.collidepoint(event.pos)):
+                        self.game_mode = "HUMAN"
+                        menuRun = False
+                    elif (AIButton.collidepoint(event.pos)):
+                        self.game_mode = "AI"
+                        menuRun = False
+    
+    
     def setBoardArray(self):
         self.totalBoard = 0
         for name in self.names:
@@ -102,6 +157,66 @@ class Board:
         # self.bitBoards = [self.wpBit, self.wrBit, self.wnBit, self.wbBit, self.wqBit, self.wkBit, self.bpBit, self.brBit, self.bnBit, self.bbBit, self.bqBit, self.bkBit]
         
 
+    def resetGame(self):
+        self.wpBit = 0
+        self.wrBit = 0
+        self.wnBit = 0
+        self.wbBit = 0
+        self.wqBit = 0
+        self.wkBit = 0
+        self.bpBit = 0
+        self.brBit = 0
+        self.bnBit = 0
+        self.bbBit = 0
+        self.bqBit = 0
+        self.bkBit = 0
+
+        for i in range(8):
+            self.wpBit |= 1 << (8 + i)
+            self.bpBit |= 1 << (48 + i)
+        self.wrBit = (1 << 0) | (1 << 7)
+        self.wnBit = (1 << 1) | (1 << 6)
+        self.wbBit = (1 << 2) | (1 << 5)
+        self.wqBit = 1 << 3
+        self.wkBit = 1 << 4
+        self.brBit = (1 << 56) | (1 << 63)
+        self.bnBit = (1 << 57) | (1 << 62)
+        self.bbBit = (1 << 58) | (1 << 61)
+        self.bqBit = 1 << 59
+        self.bkBit = 1 << 60
+        self.rooklmove = False
+        self.rookrmove = False
+        self.kingmove = False
+        self.b_rooklmove = False
+        self.b_rookrmove = False
+        self.b_kingmove = False
+        self.pieceColor = 1
+        self.setBoardArray()
+
+    def showGameOver(self, result_text):
+        overlayRun = True
+        while overlayRun:
+            surface = pygame.Surface((self.width_of_window, self.height_of_window))
+            surface.set_alpha(180)
+            surface.fill((0,0,0))
+            self.board.blit(surface, (0, 0))
+            text = self.big_font.render(result_text, True, (255, 255, 255))
+            self.board.blit(text, (self.width_of_window//2 - text.get_width()//2, 300))
+            retryButton = pygame.Rect(self.width_of_window//2 - 100, 400, 200, 50)
+            pygame.draw.rect(self.board, (116, 148, 86), retryButton)
+            buttonText = self.font.render("Play Again", True, (255, 255, 255))
+            self.board.blit(buttonText, (retryButton.x + 35, retryButton.y + 10))
+            pygame.display.flip()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if retryButton.collidepoint(event.pos):
+                        self.resetGame()
+                        overlayRun = False
+    
+    
     def load_all_pieces(self):
 
         for name in self.names:
@@ -139,25 +254,41 @@ class Board:
                     )
 
     def run(self):
+        self.show_menu()
         # The game loop: keep running until the user closes the window.
         # Each iteration of this loop is one "frame".
         while self.running:
             # pygame collects OS events (clicks, key presses, window close, etc.)
             # into a queue. We must drain the queue every frame, or the window
             # will appear frozen and unresponsive.
-            # if (self.pieceColor != self.humanColor):
-            #     print(f"\n--- AI is thinking for color {self.pieceColor} ---")
-            #     self.draw_board()
-            #     self.displayImages()
-            #     pygame.display.flip()
-            #     pygame.time.wait(500)
-            #     ai_move = self.getAIMove()
-            #     print(f"AI Move Decided")
-            #     self.make_move(ai_move[0], ai_move[1])
+            if (self.pieceColor != self.humanColor and self.game_mode == "AI"):
+                self.draw_board()
+                self.displayImages()
+                pygame.display.flip()
+                if (self.check_game_status() == "IN_PROGRESS"):
+                    print(f"\n--- AI is thinking for color {self.pieceColor} ---")
+                    ai_start, ai_target = self.getAIMove()
+                    if (ai_start != None):
+                        self.make_move(ai_start, ai_target)
+                    else:
+                        status = self.check_game_status()
+                        print(f"Game Over: {status}")
+                self.draw_board()
+                self.displayImages()
+                pygame.display.flip()
+                
+
+
+                pygame.time.wait(500)
+                
+                self.draw_board()
+                self.displayImages()
+                
                 
                 
             self.draw_board()
             self.displayImages()
+            
 
             if self.isDragging and self.draggingPieceName:
                 img = self.piece_images[self.draggingPieceName]
@@ -167,9 +298,14 @@ class Board:
 
             mouse_x, mouse_y = pygame.mouse.get_pos()
             for event in pygame.event.get():
+                if (self.game_mode == "HUMAN" or (self.pieceColor == self.humanColor)):
+                    can_move = True
+                else:
+                    can_move = False
                 if event.type == pygame.QUIT:
                     self.running = False
-                elif event.type == pygame.MOUSEBUTTONDOWN:
+                
+                elif ((event.type == pygame.MOUSEBUTTONDOWN) and (can_move == True)):
                     
                     row = mouse_y // (self.y // 8)
                     col = mouse_x // (self.x // 8)
@@ -223,6 +359,24 @@ class Board:
 
             if self.image and self.isDragging:
                 self.board.blit(self.image, self.selectedPiece)
+
+            status = self.check_game_status()
+            if status != "IN_PROGRESS":
+                self.draw_board()
+                self.displayImages()
+                pygame.display.flip()
+                if status == "CHECKMATE":
+                    if self.pieceColor == 1:
+                        winner = "Black Wins!"
+                    else:
+                        winner = "White Wins!"
+                    message = f"CHECKMATE! {winner}"
+                else:
+                    message = "STALEMATE! It's a draw."
+                pygame.time.wait(1000)
+                self.showGameOver(message)
+
+
 
             # self.startImages()
 
@@ -1065,35 +1219,7 @@ class Board:
 
 
 
-    def get_all_legal_moves(self):
-        legal_moves = []
-        # 1. Identify whose turn it is and collect their pieces
-        if self.pieceColor == 1:
-            friendly_pieces = ["wp", "wr", "wn", "wb", "wq", "wk"]
-            enemy_occupancy = self.bpBit | self.brBit | self.bnBit | self.bbBit | self.bqBit | self.bkBit
-            friendly_occupancy = self.wpBit | self.wrBit | self.wnBit | self.wbBit | self.wqBit | self.wkBit
-        else:
-            friendly_pieces = ["bp", "br", "bn", "bb", "bq", "bk"]
-            enemy_occupancy = self.wpBit | self.wrBit | self.wnBit | self.wbBit | self.wqBit | self.wkBit
-            friendly_occupancy = self.bpBit | self.brBit | self.bnBit | self.bbBit | self.bqBit | self.bkBit
-
-        # 2. Iterate through all squares and find friendly pieces
-        for start_square in range(64):
-            piece_name = None
-            for p in friendly_pieces:
-                if getattr(self, p + "Bit") & (1 << start_square):
-                    piece_name = p
-                    break
-            
-            if piece_name:
-                # 3. Use your existing checkValid logic to find potential targets
-                # (This is a bit slow but ensures consistency with your rules)
-                for target_square in range(64):
-                    if self.checkValid(start_square, piece_name, target_square):
-                        # 4. Check if the move leaves the King in check
-                        if not self.leaves_king_in_check(start_square, piece_name, target_square):
-                            legal_moves.append((start_square, target_square))
-        return legal_moves
+    
 
     def leaves_king_in_check(self, start, piece, target):
         # Save current state
@@ -1131,6 +1257,8 @@ class Board:
             king_name = "wk" if self.pieceColor == 1 else "bk"
             king_bitboard = getattr(self, king_name + "Bit")
             # Find the index of the 1 bit
+            if (king_bitboard == 0):
+                return "CHECKMATE"
             king_square = (king_bitboard & -king_bitboard).bit_length() - 1
 
             if self.is_square_attacked(king_square, -self.pieceColor):
@@ -1337,9 +1465,13 @@ class Board:
                         in_check = False
                         
                         if (self.pieceColor == 1):
-                            kingLoc = self.bkBit.bit_length() - 1
+                            kingBits = self.bkBit
                         else:
-                            kingLoc = self.wkBit.bit_length() - 1
+                            kingBits = self.wkBit
+                        if (kingBits == 0):
+                            in_check = True
+                        else:
+                            kingLoc = (kingBits & -kingBits).bit_length() - 1
                         
                         if (self.pieceColor == 1):
                             enemy_board = white_pieces
@@ -1495,7 +1627,10 @@ class Board:
             
             # 1. Outer Loop Checkmate/Draw Check
             if (self.check_game_status() == "CHECKMATE"):
-                scores.append(999)
+                if (aiSide == 1):
+                    scores.append(999)
+                else:
+                    scores.append(-999)
                 self.setBoards(currentBoards)
                 self.setBoardArray()
                 self.switchColor()
@@ -1514,7 +1649,10 @@ class Board:
                 
                 # 2. Inner Loop Checkmate/Draw Check
                 if (self.check_game_status() == "CHECKMATE"):
-                    outScores.append(-999)
+                    if (aiSide == 1):
+                        outScores.append(-999)
+                    else:
+                        outScores.append(999)
                 elif (self.check_game_status() == "DRAW"):
                     outScores.append(0)
                 else:
@@ -1548,10 +1686,10 @@ class Board:
 
             # 4. Handoff: The value of your move is the opponent's best response
             if outScores:
-                if (self.pieceColor == -1): # If opponent is Black
-                    worst_case = min(outScores)
-                else: # If opponent is White
-                    worst_case = max(outScores)
+                if (aiSide == 1):
+                   worst_case = min(outScores)
+                else:
+                   worst_case = max(outScores)
                 scores.append(worst_case)
             else:
                 scores.append(0)
@@ -1562,7 +1700,7 @@ class Board:
             self.switchColor()
 
         # 5. Final Decision
-        if (self.pieceColor == 1):
+        if (aiSide == 1):
             bestMoveIdx = np.argmax(scores)
         else:
             bestMoveIdx = np.argmin(scores)
@@ -1633,6 +1771,17 @@ if __name__ == "__main__":
     # If another file imports board.py, this block is skipped — useful later
     # when main.py becomes the proper entry point.
     model = 3
-    game = Board(model)
+    if (torch.cuda.is_available()):
+        device = torch.device("cuda")
+    else:
+        device = "cpu"
+    model = NeuralNetwork().to(device)
+    try:
+        model.load_state_dict(torch.load("chess_model_final.pth", map_location = device))
+        model.eval()
+        print("Model loaded successfully.")
+    except:
+        print("Starting with untrained model.")
+    game = Board(model=model)
     
     game.run()
