@@ -1,6 +1,6 @@
 import pygame
 import sys
-
+import torch
 import numpy as np
 
 
@@ -10,7 +10,7 @@ import numpy as np
 
 
 class Board:
-    def __init__(self):
+    def __init__(self, model):
         
         # pygame.init() starts all pygame subsystems (display, sound, input, etc.)
         # It must be called before anything else in pygame.
@@ -31,6 +31,9 @@ class Board:
         self.b_rooklmove = False
         self.b_rookrmove = False
         self.b_kingmove = False
+
+        self.model = model
+        self.humanColor = 1
 
         
 
@@ -84,6 +87,7 @@ class Board:
             self.bitBoards[name] = getattr(self, name + "Bit", 0)
         # self.bitBoards = {("wp", self.wpBit), ("wr", self.wrBit), ("wn", self.wnBit), ("wb", self.wbBit), ("wq", self.wqBit), ("wk", self.wkBit), ("bp", self.bpBit), ("br", self.brBit), ("bn", self.bnBit), ("bb", self.bbBit), ("bq", self.bqBit), ("bk", self.bkBit)}
         self.piece_images = {}
+        
         # print(self.bitBoards)
         self.load_all_pieces()
         self.displayImages()
@@ -141,7 +145,17 @@ class Board:
             # pygame collects OS events (clicks, key presses, window close, etc.)
             # into a queue. We must drain the queue every frame, or the window
             # will appear frozen and unresponsive.
-
+            # if (self.pieceColor != self.humanColor):
+            #     print(f"\n--- AI is thinking for color {self.pieceColor} ---")
+            #     self.draw_board()
+            #     self.displayImages()
+            #     pygame.display.flip()
+            #     pygame.time.wait(500)
+            #     ai_move = self.getAIMove()
+            #     print(f"AI Move Decided")
+            #     self.make_move(ai_move[0], ai_move[1])
+                
+                
             self.draw_board()
             self.displayImages()
 
@@ -156,15 +170,24 @@ class Board:
                 if event.type == pygame.QUIT:
                     self.running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
+                    
                     row = mouse_y // (self.y // 8)
                     col = mouse_x // (self.x // 8)
                     clicked_square = (7 - row) * 8 + col 
 
                     for name, board in self.bitBoards.items():
                         if (board & (1 << clicked_square)):
+                            
                             self.isDragging = True
                             self.selectedPieceSquare = clicked_square
                             self.draggingPieceName = name
+                            color = self.draggingPieceName[0]
+                            if (color == "w"):
+                                color = 1
+                            else:
+                                color = -1
+                            if (color != self.humanColor):
+                                continue
                             setattr(self, name + "Bit", getattr(self, name + "Bit") & ~(1 << clicked_square))
                             self.setBoardArray() 
                             break
@@ -183,61 +206,13 @@ class Board:
                         row = mouse_y // (self.y // 8)
                         col = mouse_x // (self.x // 8)
                         target_square = (7 - row) * 8 + col
-                        ans = self.checkValid(self.selectedPieceSquare, self.draggingPieceName, target_square)
-                        if (ans == "w_castles"):
-
-                            rook_bitboard_val = getattr(self, "wrBit")
-                            setattr(self, self.draggingPieceName + "Bit", 1 << 6)
-                            setattr(self, "wrBit", rook_bitboard_val & ~(1 << 7) | (1 << 5))
+                        currentBits = getattr(self, self.draggingPieceName + "Bit")
+                        setattr(self, self.draggingPieceName + "Bit", currentBits | (1 << self.selectedPieceSquare))
+                        self.setBoardArray()
+                        ans = self.make_move(self.selectedPieceSquare, target_square)
+                        if (not ans):
+                            
                             self.setBoardArray()
-                            
-                        if (ans == "w_castlel"):
-                            rook_bitboard_val = getattr(self, "wrBit")
-                            setattr(self, self.draggingPieceName + "Bit", 1 << 2)
-                            setattr(self, "wrBit", rook_bitboard_val & ~(1 << 0) | (1 << 3))
-                            self.setBoardArray()
-                            
-                        elif ans == "b_castles": # Black Kingside
-                            setattr(self, "bkBit", 1 << 62)
-                            self.brBit = self.brBit & ~(1 << 63) | (1 << 61)
-                            self.b_kingmove = True
-                            
-                        elif ans == "b_castlel": # Black Queenside
-                            setattr(self, "bkBit", 1 << 58)
-                            self.brBit = self.brBit & ~(1 << 56) | (1 << 59)
-                            self.b_kingmove = True
-                            
-
-                        if ans:
-                            if self.draggingPieceName == "wr":
-                                if self.selectedPieceSquare == 0: self.rooklmove = True
-                                elif self.selectedPieceSquare == 7: self.rookrmove = True
-                            elif self.draggingPieceName == "br":
-                                if self.selectedPieceSquare == 56: self.b_rooklmove = True
-                                elif self.selectedPieceSquare == 63: self.b_rookrmove = True
-                            elif self.draggingPieceName == "wk":
-                                self.kingmove = True
-                            elif self.draggingPieceName == "bk":
-                                self.b_kingmove = True
-
-
-                            enemy_prefix = "b" if self.draggingPieceName.startswith("w") else "w"
-                            for name in self.names:
-                                if name.startswith(enemy_prefix):
-                                    current_enemy_bits = getattr(self, name + "Bit")
-                                    new_enemy_bits = current_enemy_bits & ~(1 << target_square)
-                                    setattr(self, name + "Bit", new_enemy_bits)
-                                
-
-                            # Update the actual bitboard variable
-                            current_bitboard_val = getattr(self, self.draggingPieceName + "Bit")
-                            setattr(self, self.draggingPieceName + "Bit", current_bitboard_val | (1 << target_square))
-                            self.pieceColor *= -1
-
-                            self.setBoardArray() # Refresh the dictionary
-                        else:
-                            setattr(self, self.draggingPieceName + "Bit", getattr(self, self.draggingPieceName + "Bit") | (1 << self.selectedPieceSquare))
-
                         self.isDragging = False
                         self.draggingPieceName = None
 
@@ -1230,19 +1205,87 @@ class Board:
         return currentBitboards
 
     def make_move(self, start_square, target_square):
-        if (not (self.totalBoard & (1 << start_square))):
-            return False
         piece = self.pieceType(start_square)
-        board = self.boardType(target_square)
-        if (board != None):
-            self.bitBoards[board] = self.bitBoards[board] & ~(1 << target_square)
-            setattr(self, board + "Bit", self.bitBoards[board] & ~(1 << target_square))
+        if (piece == None):
+            return False
+            
+        ans = self.checkValid(start_square, piece, target_square)
+        if (not ans):
+            return False
+
+        if (ans == "w_castles"):
+            self.wrBit &= ~(1 << 7)
+            self.wrBit |= (1 << 5)
+            self.wkBit &= ~(1 << 4)
+            self.wkBit |= (1 << 6)
+            self.kingmove = True
+            self.rookrmove = True
+            setattr(self, "wrBit", self.wrBit)
+            setattr(self, "wkBit", self.wkBit)
+        elif (ans == "w_castlel"):
+            self.wrBit &= ~(1 << 0)
+            self.wrBit |= (1 << 3)
+            self.wkBit &= ~(1 << 4)
+            self.wkBit |= (1 << 2)
+            self.kingmove = True
+            self.rooklmove = True
+            setattr(self, "wrBit", self.wrBit)
+            setattr(self, "wkBit", self.wkBit)
+        elif (ans == "b_castles"):
+            self.brBit &= ~(1 << 63)
+            self.brBit |= (1 << 61)
+            self.bkBit &= ~(1 << 60)
+            self.bkBit |= (1 << 62)
+            self.b_kingmove = True
+            self.b_rookrmove = True
+            setattr(self, "brBit", self.brBit)
+            setattr(self, "bkBit", self.bkBit)
+        elif (ans == "b_castlel"):
+            self.brBit &= ~(1 << 56)
+            self.brBit |= (1 << 59)
+            self.bkBit &= ~(1 << 60)
+            self.bkBit |= (1 << 58)
+            self.b_kingmove = True
+            self.b_rooklmove = True
+            setattr(self, "brBit", self.brBit)
+            setattr(self, "bkBit", self.bkBit)
+        else:
+            board = self.boardType(target_square)
+            if (board != None):
+                self.bitBoards[board] &= ~(1 << target_square)
+                setattr(self, board + "Bit", self.bitBoards[board])
+
+            self.bitBoards[piece] &= ~(1 << start_square)
+            rank = target_square // 8
+            if (piece == "wp" and rank == 7):
+                self.bitBoards["wq"] |= (1 << target_square)
+                setattr(self, "wqBit", self.bitBoards["wq"])
+            elif (piece == "bp" and rank == 0):
+                self.bitBoards["bq"] |= (1 << target_square)
+                setattr(self, "bqBit", self.bitBoards["bq"])
+            else:
+                self.bitBoards[piece] |= (1 << target_square)
+            
+            setattr(self, piece + "Bit", self.bitBoards[piece])
+
+            if (piece == "wk"):
+                self.kingmove = True
+            elif (piece == "bk"):
+                self.b_kingmove = True
+            elif (piece == "wr"):
+                if (start_square == 0): self.rooklmove = True
+                if (start_square == 7): self.rookrmove = True
+            elif (piece == "br"):
+                if (start_square == 56): self.b_rooklmove = True
+                if (start_square == 63): self.b_rookrmove = True
+
+        self.pieceColor *= -1
+        self.setBoardArray()
+        return True
+        
 
         
-        self.bitBoards[piece] = self.bitBoards[piece] & ~(1 << start_square)
-        self.bitBoards[piece] = self.bitBoards[piece] | (1 << target_square)
-        self.pieceColor *= -1
-        setattr(self, piece + "Bit", self.bitBoards[piece])
+        
 
 
 
@@ -1337,6 +1380,242 @@ class Board:
 
 
         return legal_moves
+
+
+    # def getAIMove(self):
+    #     moveCount = 0
+    #     moves = self.get_all_legal_moves()
+        
+        
+    #     if (not moves):
+    #         return (None, None)
+    #     scores = []
+    #     for start, target in moves:
+    #         moveCount += 1
+    #         if (moveCount % 5 == 0):
+    #             print(f"Evaluating move {moveCount}/{len(moves)}...")
+    #         outScores = []
+    #         currentBoards = self.createCurrentBoards(self.getBoards())
+    #         self.make_move(start, target)
+    #         if (self.check_game_status() == "CHECKMATE"):
+    #             scores.append(999)
+    #             self.setBoards(currentBoards)
+    #             self.setBoardArray()
+    #             self.switchColor()
+    #             continue
+    #         elif (self.check_game_status() == "DRAW"):
+    #             scores.append(0)
+    #             self.setBoards(currentBoards)
+    #             self.setBoardArray()
+    #             self.switchColor()
+    #             continue
+    #         opponentMoves = self.get_all_legal_moves()
+    #         for outStart, outTarget in opponentMoves:
+    #             secondBoards = self.createCurrentBoards(self.getBoards())
+    #             self.make_move(outStart, outTarget)
+    #             if (self.check_game_status() == "CHECKMATE"):
+    #                 outScores.append(-999)
+    #                 self.setBoards(secondBoards)
+    #                 self.setBoardArray()
+    #                 self.switchColor()
+    #                 continue
+    #             elif (self.check_game_status() == "DRAW"):
+    #                 outScores.append(0)
+    #                 self.setBoards(secondBoards)
+    #                 self.setBoardArray()
+    #                 self.switchColor()
+    #                 continue
+    #             opponentMoves2 = self.get_all_legal_moves()
+    #             inScores = []
+    #             for inStart, inTarget in opponentMoves2:
+    #                 thirdBoards = self.createCurrentBoards(self.getBoards())
+    #                 self.make_move(inStart, inTarget)
+    #                 if (self.check_game_status() == "CHECKMATE"):
+    #                     inScores.append(999)
+    #                     self.setBoards(thirdBoards)
+    #                     self.setBoardArray()
+    #                     self.switchColor()
+    #                     continue
+    #                 elif (self.check_game_status() == "DRAW"):
+    #                     inScores.append(0)
+    #                     self.setBoards(thirdBoards)
+    #                     self.setBoardArray()
+    #                     self.switchColor()
+    #                     continue
+
+
+    #                 matrix = self.createMatrix()
+    #                 tens = torch.from_numpy(matrix)
+    #                 tens = tens.float()
+    #                 tens = torch.unsqueeze(tens, 0)
+    #                 with torch.no_grad():
+    #                     score = self.model(tens)
+    #                 inScores.append(score.item())
+    #                 self.setBoards(thirdBoards)
+    #                 self.setBoardArray()
+    #                 self.switchColor()
+    #             if inScores:
+    #                 outScores.append(max(inScores))
+    #             elif (self.check_game_status() == "CHECKMATE"):
+    #                 outScores.append(-999)
+    #             self.setBoards(secondBoards)
+    #             self.setBoardArray()
+    #             self.switchColor()
+    #         if outScores:
+    #             worst_case = min(outScores)
+    #             scores.append(worst_case)
+        
+        
+            
+    #         #scores.append(worst_case)
+    #         self.setBoards(currentBoards)
+    #         self.setBoardArray()
+    #         self.switchColor()
+    #     bestMove = np.argmax(scores)
+        
+    #     return moves[bestMove]
+
+    def getAIMove(self):
+        moveCount = 0
+        moves = self.get_all_legal_moves()
+        aiSide = self.pieceColor
+        
+        if (not moves):
+            return (None, None)
+            
+        scores = []
+        for start, target in moves:
+            moveCount += 1
+            if (moveCount % 5 == 0):
+                print(f"Evaluating move {moveCount}/{len(moves)}...")
+                
+            outScores = []
+            currentBoards = self.createCurrentBoards(self.getBoards())
+            self.make_move(start, target)
+            
+            # 1. Outer Loop Checkmate/Draw Check
+            if (self.check_game_status() == "CHECKMATE"):
+                scores.append(999)
+                self.setBoards(currentBoards)
+                self.setBoardArray()
+                self.switchColor()
+                continue
+            elif (self.check_game_status() == "DRAW"):
+                scores.append(0)
+                self.setBoards(currentBoards)
+                self.setBoardArray()
+                self.switchColor()
+                continue
+
+            opponentMoves = self.get_all_legal_moves()
+            for outStart, outTarget in opponentMoves:
+                secondBoards = self.createCurrentBoards(self.getBoards())
+                self.make_move(outStart, outTarget)
+                
+                # 2. Inner Loop Checkmate/Draw Check
+                if (self.check_game_status() == "CHECKMATE"):
+                    outScores.append(-999)
+                elif (self.check_game_status() == "DRAW"):
+                    outScores.append(0)
+                else:
+                    # 3. Model Evaluation happens at the end of the 2nd move
+                    matrix = self.createMatrix()
+                    tens = torch.from_numpy(matrix)
+                    tens = tens.float()
+                    tens = torch.unsqueeze(tens, 0)
+                    with torch.no_grad():
+                        score = self.model(tens).item()
+                    material_score = self.materialScore() / 10.0
+                    total_score = score + material_score
+                    if (aiSide == 1):
+                        if (self.inCheck(1, "bk")):
+                            total_score += 0.5
+                        if (self.inCheck(-1, "wk")):
+                            total_score -= 0.5
+                    elif (aiSide== -1):
+                        if (self.inCheck(1, "bk")):
+                            total_score -= 0.5
+                        if (self.inCheck(-1, "wk")):
+                            total_score += 0.5
+                    
+                    outScores.append(total_score)
+                    
+                
+                # Undo opponent move
+                self.setBoards(secondBoards)
+                self.setBoardArray()
+                self.switchColor()
+
+            # 4. Handoff: The value of your move is the opponent's best response
+            if outScores:
+                if (self.pieceColor == -1): # If opponent is Black
+                    worst_case = min(outScores)
+                else: # If opponent is White
+                    worst_case = max(outScores)
+                scores.append(worst_case)
+            else:
+                scores.append(0)
+
+            # Undo your move
+            self.setBoards(currentBoards)
+            self.setBoardArray()
+            self.switchColor()
+
+        # 5. Final Decision
+        if (self.pieceColor == 1):
+            bestMoveIdx = np.argmax(scores)
+        else:
+            bestMoveIdx = np.argmin(scores)
+            
+        return moves[bestMoveIdx]
+
+
+
+    def inCheck(self, attkColor, kingName):
+        
+        kingBit = getattr(self, kingName + "Bit")
+        kingBit = (kingBit & -kingBit).bit_length() - 1
+        if (self.is_square_attacked(kingBit, attkColor)):
+            return True
+        return False
+
+    def materialScore(self):
+        wScore = 0
+        bScore = 0
+
+        for name, bit in self.bitBoards.items():
+            if name == "wp":
+                wScore += 1 * bit.bit_count()
+            elif name == "wn" or name == "wb":
+                wScore += 3 * bit.bit_count()
+            elif name == "wr":
+                wScore += 5 * bit.bit_count()
+            elif name == "wq":
+                wScore += 9 * bit.bit_count()
+            elif name == "wk":
+                wScore += 1000 * bit.bit_count()
+            elif name == "bp":
+                bScore += 1 * bit.bit_count()
+            elif name == "bn" or name == "bb":
+                bScore += 3 * bit.bit_count()
+            elif name == "br":
+                bScore += 5 * bit.bit_count()
+            elif name == "bq":
+                bScore += 9 * bit.bit_count()
+            elif name == "bk":
+                bScore += 1000 * bit.bit_count()
+            
+        return wScore - bScore
+
+
+    def promotion(self, location):
+        return True
+
+
+
+
+    
+    
                     
 
             
@@ -1353,6 +1632,7 @@ if __name__ == "__main__":
     # This guard means the game only runs when you execute this file directly.
     # If another file imports board.py, this block is skipped — useful later
     # when main.py becomes the proper entry point.
-    game = Board()
+    model = 3
+    game = Board(model)
     
     game.run()
